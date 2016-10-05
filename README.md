@@ -1,6 +1,7 @@
 # actorstudio
 Playing with akka actors.
 
+0. install fortune : brew install fortune
 1. Open the firehose: python firehose.py
 2. monitor it: http://localhost:5000
 3. Start pique app
