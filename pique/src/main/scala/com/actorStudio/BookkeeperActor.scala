@@ -1,7 +1,8 @@
 package com.actorStudio
 
-import akka.actor.{Actor, ActorLogging, Props}
+import akka.actor.{ActorLogging, Props}
 import scala.concurrent.ExecutionContext.Implicits.global
+import akka.persistence._
 
 import scala.collection.mutable
 import scala.concurrent.duration._
@@ -14,29 +15,43 @@ import scala.concurrent.duration._
   * the process has finished otherwise trigger a re-processing.
   */
 
-class BookkeeperActor extends Actor with ActorLogging{
-  var pending = mutable.Set[String]()
+class BookkeeperActor extends PersistentActor with ActorLogging with RandomBehaviour{
+  var pending = mutable.Set[String]() // state
   lazy val fetcher = context.actorSelection("../Fetcher")
+  override def persistenceId = "bookkeeper-persistence-id"
 
   import BookkeeperActor._
   def setTimeout(docId:String) = {
     context.system.scheduler.scheduleOnce(25.seconds, self, TimeoutProcess(docId))
   }
-  def receive = {
-    case StartProcess(docId) =>
-      pending.add(docId)
+
+
+  def receiveCommand: Receive = {
+    case payload @ StartProcess(docId) =>
+      persist(payload) {
+        payload => pending.add(payload.docId)
+      }
       setTimeout(docId)
       log.info(s"started processing document $docId")
-    case EndProcess(docId) =>
-      pending.remove(docId)
+      rollTheDice()
+    case payload @ EndProcess(docId) =>
+      persist(payload) {
+        payload => pending.remove(payload.docId)
+      }
       log.info(s"finished processing document $docId")
+      rollTheDice()
     case TimeoutProcess(docId) =>
       if(pending contains docId) {
         fetcher ! FetcherActor.FetchRequest(docId)
         log.info(s"Document $docId timed out, ping again the fetcher")
         setTimeout(docId)
       }
+      rollTheDice()
+  }
 
+  def receiveRecover: Receive = {
+    case payload : StartProcess => pending.add(payload.docId)
+    case payload : EndProcess => pending.remove(payload.docId)
   }
 
 }
